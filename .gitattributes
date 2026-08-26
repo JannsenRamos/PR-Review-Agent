@@ -1,0 +1,8 @@
+* text=auto
+
+# Shell scripts must stay LF: CRLF makes bash fail with $'\r': command not found,
+# both in Git Bash here and inside the Cloud Build container.
+*.sh text eol=lf
+
+# Copied into the images verbatim.
+Dockerfile.* text eol=lf

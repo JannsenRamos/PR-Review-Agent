@@ -1,0 +1,26 @@
+{
+  "action": "opened",
+  "number": 1,
+  "pull_request": {
+    "number": 1,
+    "draft": false,
+    "title": "Add retry to the upload handler",
+    "head": {
+      "sha": "0000000000000000000000000000000000000000",
+      "ref": "feature/retry"
+    },
+    "base": {
+      "ref": "main"
+    }
+  },
+  "repository": {
+    "full_name": "OWNER/REPO",
+    "name": "REPO",
+    "owner": {
+      "login": "OWNER"
+    }
+  },
+  "installation": {
+    "id": 0
+  }
+}
