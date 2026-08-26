@@ -56,10 +56,20 @@ On macOS/Linux use `python3.12` and `.venv/bin/python`.
 
 ### 2. GitHub App
 
-Create a GitHub App with **Pull requests: read & write**, **Checks: read**,
-**Contents: read**, subscribed to the **Pull request** event. Install it on the
-target repo. Keep the App ID, the generated private key `.pem`, and the webhook
-secret.
+Create a GitHub App with these repository permissions, subscribed to the
+**Pull request** event:
+
+| Permission | Level | Why |
+|---|---|---|
+| Pull requests | Read and write | inline comments, request changes, reviewers |
+| Issues | Read and write | summary comments and labels go through `/issues/{n}/...` |
+| Contents | Read-only | `CONTRIBUTING.md`, lint config, file context |
+| Checks | Read-only | the CI gate |
+| Metadata | Read-only | mandatory, auto-selected |
+
+Install it on the target repo. Keep the App ID, the generated private key
+`.pem`, and the webhook secret. The installation ID arrives in every webhook
+payload, so there is nothing to record for it.
 
 A Personal Access Token works as a fallback: set `GITHUB_PAT` instead of
 `GITHUB_APP_ID` + `GITHUB_PRIVATE_KEY`. `get_token()` picks the mode; nothing
@@ -86,7 +96,7 @@ Pin the model. Find the exact Gemini id available in your region and set it —
 the code deliberately has no default:
 
 ```bash
-gcloud ai models list --region=us-central1
+gcloud ai model-garden models list | grep gemini
 export GEMINI_MODEL=<exact-model-id>
 ```
 
@@ -152,10 +162,10 @@ shared package to build and version.
 
 ## Status
 
-Pipeline, tools and prompts are scaffolded; the ADK agent wiring in
-`worker/agent/root.py` is the remaining piece. Until it exists, the worker posts
-a placeholder comment so the plumbing can be proven end to end without the model
-— see `run_review()` in `worker/main.py`.
+Code complete, not yet deployed. Nothing has run against a real pull request or
+a real model; the tests are offline by design and cover structure and guardrails,
+not model behaviour. Remaining work is environmental: install `gcloud`, register
+the GitHub App, pin `GEMINI_MODEL`, run `infra/deploy.sh`.
 
 ## Roadmap
 

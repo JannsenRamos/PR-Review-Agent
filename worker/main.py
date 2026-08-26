@@ -93,7 +93,7 @@ async def jobs(request: Request, authorization: str | None = Header(default=None
                 write_review_event(repo, pr_number, head_sha, [], OUTCOME_SKIPPED_CI_RED, ci_state)
                 return Response(status_code=200)
 
-        run_review(repo, pr_number, head_sha, installation_id, ci_state)
+        await run_review(repo, pr_number, head_sha, installation_id, ci_state)
         return Response(status_code=200)
 
     except Exception as exc:
@@ -103,23 +103,23 @@ async def jobs(request: Request, authorization: str | None = Header(default=None
         return Response(status_code=500)
 
 
-def run_review(repo: str, pr_number: int, head_sha: str, installation_id, ci_state: str) -> None:
-    """Seam where the ADK agent plugs in (Day 1 step 6 / Day 2).
+async def run_review(repo: str, pr_number: int, head_sha: str, installation_id, ci_state: str) -> None:
+    """Hand the PR to the ADK agent.
 
-    Until GEMINI_MODEL is pinned and the agent is wired, this closes the pipe
-    end to end so the plumbing can be proven independently of the model.
+    A model-side failure is not a retry: the same tokens would buy the same
+    result. It is a completed review that escalates, and it is recorded as one.
     """
+    from agent.root import review_pull_request
+
     try:
-        from agent.root import review_pull_request
-    except ImportError:
+        await review_pull_request(repo, pr_number, head_sha, installation_id, ci_state)
+    except Exception:
+        log.exception("agent run failed for %s#%s, escalating", repo, pr_number)
         post_summary_comment(
             repo,
             pr_number,
-            f"PR Review Agent reached `{head_sha[:7]}` — pipeline is live, agent not yet wired.",
+            f"I couldn't complete an automated review of `{head_sha[:7]}` and I'm not going to "
+            "guess. Escalating to a human reviewer.",
             installation_id,
         )
         write_review_event(repo, pr_number, head_sha, [], OUTCOME_ESCALATED, ci_state)
-        log.info("posted placeholder for %s#%s", repo, pr_number)
-        return
-
-    review_pull_request(repo, pr_number, head_sha, installation_id, ci_state)

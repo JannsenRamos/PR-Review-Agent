@@ -7,7 +7,8 @@ import os
 # --- Model -------------------------------------------------------------------
 # Pin this explicitly. Resolve the exact model available in your Vertex region
 # before Day 1 ends and paste the id here; do not rely on a floating alias, and
-# do not guess. `gcloud ai models list --region=$VERTEX_LOCATION` is the check.
+# do not guess. `gcloud ai model-garden models list | grep gemini` is the check
+# (NOT `gcloud ai models list`, which lists custom Model Registry models only).
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "")
 
 VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION", "us-central1")

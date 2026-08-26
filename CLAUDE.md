@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Scaffolded, not yet deployed. Receiver, worker plumbing, agent tools and prompts exist; `worker/agent/root.py` (the ADK wiring) does not. Until it does, `run_review()` in `worker/main.py` posts a placeholder comment so the pipeline can be proven without the model. `main` has no commits yet.
+Code complete for V1, not yet deployed — nothing has run against a real PR or a real model. Receiver, worker, all three ADK sub-agents and their tools exist and are covered by offline tests. What remains is entirely environmental: install `gcloud`, register the GitHub App, pin `GEMINI_MODEL`, run `infra/deploy.sh`.
+
+Agent tools are bound as closures over the PR context (`_bind_tools` in `worker/agent/root.py`), so the model supplies only `path`, `line`, `body` and `citation` and cannot get the repo or commit SHA wrong. `ReviewLedger` records what the agent *did* — built from real tool calls, not from the model's closing summary — and that ledger is what gets persisted.
+
+ADK 2.7 deprecates `SequentialAgent` in favour of `Workflow`. Deliberately not migrated; the rationale is in `root.py` next to the call.
 
 Source of truth for what is being built:
 
@@ -74,9 +78,10 @@ GITHUB_WEBHOOK_SECRET=x ./.venv/Scripts/python.exe scripts/replay.py fixtures/pu
 Verified on this machine, Aug 26 2026:
 
 - **Use Python 3.12** (`py -3.12`). The default `python` is 3.14.2; `google-adk` 2.7.1 installs and imports cleanly on 3.12, which is what `.venv` and both Dockerfiles use.
-- **`gcloud` is not installed.** Nothing deploys until the Google Cloud CLI is installed and both `gcloud auth login` and `gcloud auth application-default login` have run.
+- **`gcloud` 582.0.0 is installed** at `%LOCALAPPDATA%\Google\Cloud SDK\google-cloud-sdk\bin`, authenticated. A shell started before the install will not have it on PATH — prepend that directory rather than asking for a session restart.
+- **`gcloud auth application-default login` has NOT been run.** Without ADC, any local Python touching Vertex or Firestore fails with a SERVICE_DISABLED error naming project 32555940559 (gcloud's shared client project), which is misleading — the real cause is missing ADC and no quota project.
 - Available: node 24.13.0, gh 2.97.0, docker 29.1.3, git 2.42.0.
-- **`GEMINI_MODEL` has no default on purpose.** Resolve the exact ID available in the project's Vertex AI region (`gcloud ai models list --region=...`) and set it in the environment. Never guess a model ID.
+- **`GEMINI_MODEL` has no default on purpose.** Resolve the exact ID available in the project's Vertex AI region (`gcloud ai model-garden models list | grep gemini`) and set it in the environment. Never guess a model ID.
 - Requirements are loosely bounded pending a first clean install; `pip freeze` into them once the stack is proven.
 
 ## Working practices
