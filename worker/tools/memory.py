@@ -39,10 +39,14 @@ def fetch_past_reviews(repo: str, paths: list[str], limit: int = PAST_REVIEW_LIM
     link to create it the first time this runs.
     """
     try:
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        # FieldFilter, not positional args: the positional form is deprecated
+        # and warns on every call.
         query = (
             db()
             .collection(FIRESTORE_COLLECTION)
-            .where("repo", "==", repo)
+            .where(filter=FieldFilter("repo", "==", repo))
             .order_by("timestamp", direction="DESCENDING")
             .limit(limit * 4)
         )

@@ -30,6 +30,16 @@ gcloud pubsub topics create "$DLQ"   2>/dev/null || echo "    $DLQ exists"
 echo "==> Firestore (native mode; fails harmlessly if the database exists)"
 gcloud firestore databases create --location="$REGION" 2>/dev/null || echo "    database exists"
 
+# fetch_past_reviews filters on repo and orders by timestamp, which Firestore
+# refuses without a composite index — it fails at query time with
+# FAILED_PRECONDITION, not at write time, so the gap only shows up mid-review.
+echo "==> Firestore composite index for fetch_past_reviews"
+gcloud firestore indexes composite create \
+  --collection-group=reviews \
+  --field-config=field-path=repo,order=ascending \
+  --field-config=field-path=timestamp,order=descending \
+  --async 2>/dev/null || echo "    index exists or is already building"
+
 echo "==> Service account"
 SA="pr-review-agent@${GCP_PROJECT}.iam.gserviceaccount.com"
 gcloud iam service-accounts create pr-review-agent \
