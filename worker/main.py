@@ -32,8 +32,9 @@ log = logging.getLogger("worker")
 app = FastAPI(title="pr-review-worker")
 
 
-@app.get("/healthz")
-def healthz() -> dict[str, str]:
+# NOT /healthz: Google's frontend reserves that path on *.run.app.
+@app.get("/health")
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 

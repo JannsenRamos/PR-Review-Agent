@@ -49,20 +49,40 @@ done
 SECRETS="GITHUB_WEBHOOK_SECRET=github-webhook-secret:latest"
 SECRETS="${SECRETS},GITHUB_PRIVATE_KEY=github-private-key:latest"
 
+echo "==> Artifact Registry"
+AR_REPO="containers"
+gcloud artifacts repositories create "$AR_REPO" \
+  --repository-format=docker --location="$REGION" \
+  --description="PR review agent images" 2>/dev/null || echo "    $AR_REPO exists"
+
+IMAGE_BASE="${REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}"
+WORKER_IMAGE="${IMAGE_BASE}/pr-review-worker:latest"
+RECEIVER_IMAGE="${IMAGE_BASE}/pr-review-receiver:latest"
+
+# gcloud run deploy --source has no --dockerfile flag and assumes a root
+# "Dockerfile", so build both images explicitly and deploy by image.
+echo "==> Building worker image (first build in a new project is slow)"
+gcloud builds submit --config=infra/cloudbuild.yaml \
+  --substitutions="_DOCKERFILE=Dockerfile.worker,_IMAGE=${WORKER_IMAGE}"
+
+echo "==> Building receiver image"
+gcloud builds submit --config=infra/cloudbuild.yaml \
+  --substitutions="_DOCKERFILE=Dockerfile.receiver,_IMAGE=${RECEIVER_IMAGE}"
+
 echo "==> Deploying worker (private: only Pub/Sub push reaches it)"
 gcloud run deploy pr-review-worker \
-  --source=. --dockerfile=Dockerfile.worker \
+  --image="$WORKER_IMAGE" \
   --region="$REGION" --service-account="$SA" \
   --no-allow-unauthenticated \
   --memory=2Gi --timeout=900 --concurrency=1 \
   --set-secrets="$SECRETS" \
-  --set-env-vars="GCP_PROJECT=${GCP_PROJECT},VERTEX_LOCATION=${REGION},GEMINI_MODEL=${GEMINI_MODEL:-},GITHUB_APP_ID=${GITHUB_APP_ID:-}"
+  --set-env-vars="GCP_PROJECT=${GCP_PROJECT},VERTEX_LOCATION=${VERTEX_LOCATION:-global},GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.7-flash},GITHUB_APP_ID=${GITHUB_APP_ID:-}"
 
 WORKER_URL=$(gcloud run services describe pr-review-worker --region="$REGION" --format='value(status.url)')
 
 echo "==> Deploying receiver (public: GitHub posts here)"
 gcloud run deploy pr-review-receiver \
-  --source=. --dockerfile=Dockerfile.receiver \
+  --image="$RECEIVER_IMAGE" \
   --region="$REGION" --service-account="$SA" \
   --allow-unauthenticated \
   --memory=512Mi --timeout=60 \
@@ -86,12 +106,21 @@ gcloud pubsub subscriptions create "$SUB" \
        --dead-letter-topic="$DLQ" \
        --max-delivery-attempts=5
 
-# Pub/Sub's own service agent needs permission to push and to dead-letter.
 PROJECT_NUMBER=$(gcloud projects describe "$GCP_PROJECT" --format='value(projectNumber)')
 PUBSUB_SA="service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com"
+
+# The push request carries an OIDC token for --push-auth-service-account ($SA),
+# so it is $SA that needs run.invoker on the worker — NOT the Pub/Sub service
+# agent. Granting the service agent instead yields an endless 403 loop on
+# /jobs that looks like an app bug but never reaches the app.
 gcloud run services add-iam-policy-binding pr-review-worker \
-  --region="$REGION" --member="serviceAccount:${PUBSUB_SA}" \
+  --region="$REGION" --member="serviceAccount:${SA}" \
   --role=roles/run.invoker >/dev/null
+
+# The service agent's part is being allowed to mint tokens as $SA.
+gcloud iam service-accounts add-iam-policy-binding "$SA" \
+  --member="serviceAccount:${PUBSUB_SA}" \
+  --role=roles/iam.serviceAccountTokenCreator >/dev/null
 gcloud pubsub topics add-iam-policy-binding "$DLQ" \
   --member="serviceAccount:${PUBSUB_SA}" --role=roles/pubsub.publisher >/dev/null
 

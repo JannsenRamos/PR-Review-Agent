@@ -5,13 +5,25 @@ from __future__ import annotations
 import os
 
 # --- Model -------------------------------------------------------------------
-# Pin this explicitly. Resolve the exact model available in your Vertex region
-# before Day 1 ends and paste the id here; do not rely on a floating alias, and
-# do not guess. `gcloud ai model-garden models list | grep gemini` is the check
-# (NOT `gcloud ai models list`, which lists custom Model Registry models only).
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "")
+# Pinned explicitly, not a floating alias. Resolved Aug 27 2026 against
+# publishers/google/models in us-central1 for project pr-review-agent-ajr:
+# 3.5-flash, 3.6-flash and 3.7-flash are GA there, and no Pro exists at 3.5+.
+# Chose the newest GA model that meets the PRD's "Gemini 3.5+" requirement.
+#
+# Listing publisher models is NOT a reliable availability check — the global
+# list happily returns models a given project/region cannot call. The only
+# trustworthy probe is actually invoking it:
+#   curl -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+#     -H "Content-Type: application/json" \
+#     "https://aiplatform.googleapis.com/v1/projects/$GCP_PROJECT/locations/global/publishers/google/models/$MODEL:generateContent" \
+#     -d '{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}'
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.7-flash")
 
-VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION", "us-central1")
+# "global", not a region. Verified Aug 27 2026: every Gemini 3.x model 404s on
+# us-central1 for this project while all of them answer on the global endpoint;
+# only 2.5 is served regionally. Setting this to the Cloud Run region is the
+# mistake that produces "Publisher model ... was not found".
+VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION", "global")
 
 # --- Cloud -------------------------------------------------------------------
 GCP_PROJECT = os.environ.get("GCP_PROJECT", "")
@@ -47,5 +59,9 @@ def review_key(repo: str, pr_number: int, head_sha: str) -> str:
 
     Pub/Sub is at-least-once; without checking this before analysis a redelivery
     double-comments on the PR.
+
+    The slash in "owner/name" must be escaped: Firestore reads "/" as a path
+    separator, so an unescaped repo name splits the id into collection/document
+    segments and raises "A document must have an even number of path elements".
     """
-    return f"{repo}:{pr_number}:{head_sha}"
+    return f"{repo.replace('/', '_')}:{pr_number}:{head_sha}"

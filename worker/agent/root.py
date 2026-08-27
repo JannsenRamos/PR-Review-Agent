@@ -196,13 +196,18 @@ def _bind_tools(repo: str, pr_number: int, head_sha: str, installation_id, ledge
     )
 
 
-def _log_tool_call(tool, args, context):
+def _log_tool_call(tool=None, args=None, tool_context=None, **_ignored):
     """Make the agent's decisions visible in Cloud Run logs.
 
-    Worth the four lines: on demo day this log is the evidence that the agent
+    Worth the few lines: on demo day this log is the evidence that the agent
     chose its own tool calls rather than following a script.
+
+    Signature is keyword-tolerant on purpose — ADK invokes this callback with
+    keyword arguments (tool=, args=, tool_context=), and a positional-only
+    signature raises TypeError on the first tool call, mid-review.
     """
-    log.info("tool_call %s args=%s", tool.name, {k: str(v)[:120] for k, v in (args or {}).items()})
+    name = getattr(tool, "name", tool)
+    log.info("tool_call %s args=%s", name, {k: str(v)[:120] for k, v in (args or {}).items()})
     return None
 
 

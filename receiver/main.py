@@ -44,8 +44,10 @@ def publisher():
     return _publisher, _topic_path
 
 
-@app.get("/healthz")
-def healthz() -> dict[str, str]:
+# NOT /healthz: Google's frontend reserves that path on *.run.app and answers it
+# with its own 404 before the request ever reaches the container.
+@app.get("/health")
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 

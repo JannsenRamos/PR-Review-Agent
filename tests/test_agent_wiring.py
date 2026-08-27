@@ -103,3 +103,14 @@ def test_adk_can_derive_a_schema_for_every_tool(monkeypatch):
             declaration = FunctionTool(func=fn)._get_declaration()
             assert declaration.name == fn.__name__
             assert declaration.description, f"{fn.__name__} needs a docstring"
+
+
+def test_review_key_has_no_slash():
+    """Firestore reads '/' as a path separator, so an unescaped "owner/name"
+    raises 'A document must have an even number of path elements' at write time —
+    caught in production, not by the earlier offline tests."""
+    from config import review_key
+
+    key = review_key("JannsenRamos/PR-Review-Agent", 1, "04f3005")
+    assert "/" not in key
+    assert key == "JannsenRamos_PR-Review-Agent:1:04f3005"
