@@ -43,6 +43,25 @@ def _configure_vertex() -> None:
     os.environ.setdefault("GOOGLE_CLOUD_LOCATION", VERTEX_LOCATION)
 
 
+class TransientModelError(RuntimeError):
+    """Vertex was out of capacity. Retry the job; do not escalate the review."""
+
+
+def _is_capacity_error(exc: Exception) -> bool:
+    """True for 429/RESOURCE_EXHAUSTED, however the SDK happens to wrap it.
+
+    Matched on the message rather than the exception class because ADK rewraps
+    the genai error in its own private type, which is not a stable import.
+    """
+    import re
+
+    # Vertex says "RESOURCE_EXHAUSTED", the SDK says "Resource exhausted." and
+    # ADK's wrapper says "_ResourceExhaustedError" — strip everything that is
+    # not alphanumeric so all three collapse to the same needle.
+    text = re.sub(r"[^A-Z0-9]", "", f"{type(exc).__name__} {exc}".upper())
+    return "429" in text or "RESOURCEEXHAUST" in text
+
+
 class ReviewLedger:
     """Records what the agent actually did, for the Firestore event.
 
@@ -299,6 +318,14 @@ async def review_pull_request(
         ):
             if getattr(event, "author", None) and event.is_final_response():
                 log.info("phase complete: %s", event.author)
+    except Exception as exc:
+        # A 429 is capacity, not a bad answer. Escalating it to a human would
+        # burn the review for a condition that clears on its own, so hand it
+        # back to Pub/Sub — but only while nothing has been posted yet, since a
+        # redelivery re-runs every phase and would duplicate comments.
+        if _is_capacity_error(exc) and not ledger.findings:
+            raise TransientModelError(str(exc)[:200]) from exc
+        log.exception("agent run failed after %d recorded action(s)", len(ledger.findings))
     finally:
         await runner.close()
 

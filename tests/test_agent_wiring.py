@@ -114,3 +114,12 @@ def test_review_key_has_no_slash():
     key = review_key("JannsenRamos/PR-Review-Agent", 1, "04f3005")
     assert "/" not in key
     assert key == "JannsenRamos_PR-Review-Agent:1:04f3005"
+
+
+def test_capacity_errors_are_distinguished_from_bad_answers():
+    """A 429 is transient capacity, not an unusable model answer: it must be
+    retried by Pub/Sub, not escalated to a human."""
+    assert root._is_capacity_error(RuntimeError("429 RESOURCE_EXHAUSTED"))
+    assert root._is_capacity_error(RuntimeError("Resource exhausted. Try later."))
+    assert not root._is_capacity_error(RuntimeError("404 NOT_FOUND"))
+    assert not root._is_capacity_error(ValueError("bad json from model"))

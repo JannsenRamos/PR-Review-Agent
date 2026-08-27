@@ -110,10 +110,14 @@ async def run_review(repo: str, pr_number: int, head_sha: str, installation_id, 
     A model-side failure is not a retry: the same tokens would buy the same
     result. It is a completed review that escalates, and it is recorded as one.
     """
-    from agent.root import review_pull_request
+    from agent.root import TransientModelError, review_pull_request
 
     try:
         await review_pull_request(repo, pr_number, head_sha, installation_id, ci_state)
+    except TransientModelError:
+        # Out of Vertex capacity with nothing posted yet: let it bubble so /jobs
+        # returns 500 and Pub/Sub redelivers with backoff.
+        raise
     except Exception:
         log.exception("agent run failed for %s#%s, escalating", repo, pr_number)
         post_summary_comment(
