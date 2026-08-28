@@ -17,8 +17,8 @@ import uuid
 
 from config import (
     FINDING_TYPES,
-    GEMINI_MODEL,
     GCP_PROJECT,
+    GEMINI_MODEL,
     OUTCOME_CHANGES_REQUESTED,
     OUTCOME_ESCALATED,
     PAST_REVIEW_LIMIT,
@@ -201,7 +201,7 @@ def _bind_tools(repo: str, pr_number: int, head_sha: str, installation_id, ledge
 
     # --- phase 3: act -------------------------------------------------------
     def post_inline_comment(
-        finding_type: str, path: str, line: int, body: str, citation: str
+        path: str, line: int, body: str, citation: str, finding_type: str = ""
     ) -> dict:
         """Post one comment anchored to a specific line, for a HIGH-confidence finding.
 
@@ -225,6 +225,11 @@ def _bind_tools(repo: str, pr_number: int, head_sha: str, installation_id, ledge
                 suppressed_reason=reason,
             )
 
+        # Defaulted rather than required so an omitted classification lands here,
+        # as a recorded refusal the agent can act on. Left required, ADK raises
+        # TypeError before this function runs and the attempt vanishes from the
+        # ledger - which is how a comment aimed outside the diff went unrecorded
+        # on the first live run.
         kind = finding_type if finding_type in FINDING_TYPES else "unknown"
         if kind == "unknown":
             suppress("unknown_finding_type")
@@ -233,8 +238,21 @@ def _bind_tools(repo: str, pr_number: int, head_sha: str, installation_id, ledge
                 "detail": f"finding_type must be one of {', '.join(FINDING_TYPES)}.",
             }
 
+        # An unknown path is the dangerous case, not the safe one: .get()
+        # returning None used to skip this guard entirely, so a comment on a file
+        # the PR never touched sailed through to GitHub and was stopped only by a
+        # 422 - a network round trip enforcing an invariant that belongs here.
         allowed = ledger.commentable.get(path)
-        if allowed is not None and line not in allowed:
+        if allowed is None:
+            suppress("file_not_in_diff")
+            return {
+                "error": "file_not_in_diff",
+                "detail": (
+                    f"{path} is not part of this pull request. Review only the files "
+                    "fetch_diff returned."
+                ),
+            }
+        if line not in allowed:
             suppress("line_not_in_diff")
             return {
                 "error": "line_not_in_diff",

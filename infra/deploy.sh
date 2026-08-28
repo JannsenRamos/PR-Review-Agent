@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Idempotent deploy: safe to re-run. Every step either creates or no-ops.
 #
-#   export GCP_PROJECT=your-project REGION=us-central1
+#   export GCP_PROJECT=your-project REGION=us-central1 GEMINI_MODEL=<exact-id>
 #   bash infra/deploy.sh
 #
 # Prerequisites this script does NOT do for you:
@@ -10,6 +10,8 @@
 set -euo pipefail
 
 : "${GCP_PROJECT:?set GCP_PROJECT}"
+# Resolved per project and region, never guessed - see worker/config.py.
+: "${GEMINI_MODEL:?set GEMINI_MODEL to the exact model id this project can call}"
 REGION="${REGION:-us-central1}"
 TOPIC="pr-review-jobs"
 DLQ="pr-review-dlq"
@@ -26,6 +28,13 @@ gcloud services enable \
 echo "==> Topics"
 gcloud pubsub topics create "$TOPIC" 2>/dev/null || echo "    $TOPIC exists"
 gcloud pubsub topics create "$DLQ"   2>/dev/null || echo "    $DLQ exists"
+
+# A dead-letter topic with no subscription discards on arrival: the message is
+# routed off the main subscription after 5 attempts and then dropped, so a
+# poisoned job looks identical to one that never existed. This subscription is
+# never consumed - it exists so the message is retained and can be inspected.
+gcloud pubsub subscriptions create "${DLQ}-hold" --topic="$DLQ" \
+  --message-retention-duration=7d 2>/dev/null || echo "    ${DLQ}-hold exists"
 
 echo "==> Firestore (native mode; fails harmlessly if the database exists)"
 gcloud firestore databases create --location="$REGION" 2>/dev/null || echo "    database exists"
@@ -86,7 +95,7 @@ gcloud run deploy pr-review-worker \
   --no-allow-unauthenticated \
   --memory=2Gi --timeout=900 --concurrency=1 \
   --set-secrets="$SECRETS" \
-  --set-env-vars="GCP_PROJECT=${GCP_PROJECT},VERTEX_LOCATION=${VERTEX_LOCATION:-global},GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.7-flash},GITHUB_APP_ID=${GITHUB_APP_ID:-}"
+  --set-env-vars="GCP_PROJECT=${GCP_PROJECT},VERTEX_LOCATION=${VERTEX_LOCATION:-global},GEMINI_MODEL=${GEMINI_MODEL},GITHUB_APP_ID=${GITHUB_APP_ID:-}"
 
 WORKER_URL=$(gcloud run services describe pr-review-worker --region="$REGION" --format='value(status.url)')
 

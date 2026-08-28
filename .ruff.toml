@@ -1,0 +1,22 @@
+# Lint rules for this repo.
+#
+# Also read by the review agent: fetch_guidelines probes for .ruff.toml and
+# quotes it as evidence, so a rule written here is a rule the agent may cite in
+# an inline comment. Keep entries meaningful rather than exhaustive.
+
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "fixtures"]
+
+[lint]
+# E/W pycodestyle, F pyflakes, B bugbear, I import order, UP pyupgrade.
+select = ["E", "W", "F", "B", "I", "UP"]
+
+# E501 is the long-line check; line-length above is the real setting and the
+# prose-heavy docstrings in this codebase are deliberate.
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+# Both services put their package root on sys.path before importing from it, so
+# module-level imports cannot all sit at the top.
+"tests/*" = ["E402"]

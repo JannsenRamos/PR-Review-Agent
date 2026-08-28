@@ -9,6 +9,7 @@ belongs in the live demo run, not here.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -51,7 +52,7 @@ def test_line_outside_the_diff_is_suppressed_not_posted():
     ledger.commentable["a.py"] = {10, 11, 12}
     ledger.add_evidence("Handle every error at the boundary.")
     result = post_inline_comment(
-        "defect", "a.py", 99, "Unhandled error", "CONTRIBUTING.md: 'handle every error at the boundary'"
+        "a.py", 99, "Unhandled error", "CONTRIBUTING.md: 'handle every error at the boundary'", "defect"
     )
 
     assert result["error"] == "line_not_in_diff"
@@ -142,8 +143,8 @@ def test_a_citation_must_quote_something_the_agent_fetched():
     ledger.add_evidence("Every outbound call must check the status before parsing the body.")
 
     result = post_inline_comment(
-        "convention", "a.py", 10, "Response parsed without a status check",
-        "CONTRIBUTING.md: 'all responses must be validated against a schema'",
+        "a.py", 10, "Response parsed without a status check",
+        "CONTRIBUTING.md: 'all responses must be validated against a schema'", "convention",
     )
 
     assert result["error"] == "citation_not_grounded"
@@ -175,7 +176,7 @@ def test_findings_are_recorded_with_their_class_not_as_unknown():
     ledger.commentable["a.py"] = {10}
     ledger.add_evidence("Close every file handle you open.")
     result = post_inline_comment(
-        "not_a_real_class", "a.py", 10, "Leaks a handle", "CONTRIBUTING.md: 'close every file handle you open'"
+        "a.py", 10, "Leaks a handle", "CONTRIBUTING.md: 'close every file handle you open'", "not_a_real_class"
     )
 
     assert result["error"] == "unknown_finding_type"
@@ -268,3 +269,79 @@ def test_decision_is_a_complete_audit_trail():
     assert decision["suppressed_reasons"] == {"citation_not_grounded": 1}
     assert decision["evidence_sources"] == 1
     assert decision["escalation_reason"] is None
+
+
+def test_a_rule_full_of_inline_code_is_still_checkable():
+    """Regression, from the first live run of the gate: backticks were treated
+    as quote delimiters, so a verbatim quote of rule 9 was shredded into
+    fragments too short to match and a correct citation was refused."""
+    evidence = (
+        "9. Log messages use lazy `%s` formatting - `log.info(\"saw %s\", x)`, not\n"
+        "   `log.info(f\"saw {{x}}\")`."
+    )
+    citation = "Log messages use lazy `%s` formatting - `log.info(\"saw %s\", x)`, not\n`log.info(f\"saw {{x}}\")`."
+    assert github_write.citation_is_grounded(citation, evidence)
+
+
+def test_a_file_the_pr_never_touched_never_reaches_github():
+    """The hole the live run walked through: an unknown path left commentable
+    .get() returning None, which skipped the guard instead of tripping it."""
+    ledger = root.ReviewLedger()
+    _, _, act = _tools(ledger)
+    post_inline_comment = next(f for f in act if f.__name__ == "post_inline_comment")
+
+    ledger.commentable["in_the_pr.py"] = {10}
+    ledger.add_evidence("Close every file handle you open.")
+
+    result = post_inline_comment(
+        "not_in_the_pr.py", 294, "Leaks a handle",
+        "CONTRIBUTING.md: 'close every file handle you open'", "defect",
+    )
+
+    assert result["error"] == "file_not_in_diff"
+    assert ledger.findings[0]["suppressed_reason"] == "file_not_in_diff"
+    assert ledger.posted_inline == 0
+
+
+def test_an_omitted_classification_is_recorded_not_raised():
+    """Left required, ADK raises TypeError before the wrapper runs and the
+    attempt never reaches the ledger."""
+    ledger = root.ReviewLedger()
+    _, _, act = _tools(ledger)
+    post_inline_comment = next(f for f in act if f.__name__ == "post_inline_comment")
+
+    ledger.commentable["a.py"] = {10}
+    result = post_inline_comment("a.py", 10, "Something", "CONTRIBUTING.md: 'a written rule here'")
+
+    assert result["error"] == "unknown_finding_type"
+    assert len(ledger.findings) == 1
+
+
+def test_the_model_id_has_no_default():
+    """A plausible-but-wrong id would deploy clean and fail at the first Vertex
+    call; build_agent's error exists to prevent that and a default hid it."""
+    import config
+
+    assert config.GEMINI_MODEL == os.environ.get("GEMINI_MODEL", "")
+
+
+def test_every_tool_the_agent_is_given_is_named_in_its_instructions(monkeypatch):
+    """apply_label sat in the tool surface for three days and was never called
+    once: nothing in the executor's instructions mentioned it. A tool the model
+    is handed but never told about is dead weight that looks like a feature."""
+    from agent import prompts
+
+    monkeypatch.setattr(root, "GEMINI_MODEL", "gemini-test-model")
+    agent = root.build_agent(*PR, root.ReviewLedger())
+
+    instructions = {
+        "diff_analyzer": prompts.DIFF_ANALYZER,
+        "convention_checker": prompts.CONVENTION_CHECKER,
+        "action_executor": prompts.ACTION_EXECUTOR,
+    }
+    for sub in agent.sub_agents:
+        text = instructions[sub.name]
+        for fn in sub.tools:
+            assert fn.__name__ in text, (
+                f"{sub.name} is given {fn.__name__} but never mentions it"
+            )
