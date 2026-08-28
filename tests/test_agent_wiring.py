@@ -323,3 +323,25 @@ def test_the_model_id_has_no_default():
     import config
 
     assert config.GEMINI_MODEL == os.environ.get("GEMINI_MODEL", "")
+
+
+def test_every_tool_the_agent_is_given_is_named_in_its_instructions(monkeypatch):
+    """apply_label sat in the tool surface for three days and was never called
+    once: nothing in the executor's instructions mentioned it. A tool the model
+    is handed but never told about is dead weight that looks like a feature."""
+    from agent import prompts
+
+    monkeypatch.setattr(root, "GEMINI_MODEL", "gemini-test-model")
+    agent = root.build_agent(*PR, root.ReviewLedger())
+
+    instructions = {
+        "diff_analyzer": prompts.DIFF_ANALYZER,
+        "convention_checker": prompts.CONVENTION_CHECKER,
+        "action_executor": prompts.ACTION_EXECUTOR,
+    }
+    for sub in agent.sub_agents:
+        text = instructions[sub.name]
+        for fn in sub.tools:
+            assert fn.__name__ in text, (
+                f"{sub.name} is given {fn.__name__} but never mentions it"
+            )
