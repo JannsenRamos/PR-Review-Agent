@@ -91,7 +91,10 @@ async def jobs(request: Request, authorization: str | None = Header(default=None
                     f"CI went red on `{head_sha[:7]}` while this was queued — skipping review.",
                     installation_id,
                 )
-                write_review_event(repo, pr_number, head_sha, [], OUTCOME_SKIPPED_CI_RED, ci_state)
+                write_review_event(
+                    repo, pr_number, head_sha, [], OUTCOME_SKIPPED_CI_RED, ci_state,
+                    {"outcome": OUTCOME_SKIPPED_CI_RED, "escalation_reason": "ci_red_before_review"},
+                )
                 return Response(status_code=200)
 
         await run_review(repo, pr_number, head_sha, installation_id, ci_state)
@@ -127,4 +130,7 @@ async def run_review(repo: str, pr_number: int, head_sha: str, installation_id, 
             "guess. Escalating to a human reviewer.",
             installation_id,
         )
-        write_review_event(repo, pr_number, head_sha, [], OUTCOME_ESCALATED, ci_state)
+        write_review_event(
+            repo, pr_number, head_sha, [], OUTCOME_ESCALATED, ci_state,
+            {"outcome": OUTCOME_ESCALATED, "escalation_reason": "agent_run_failed"},
+        )

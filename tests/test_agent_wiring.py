@@ -49,7 +49,10 @@ def test_line_outside_the_diff_is_suppressed_not_posted():
     post_inline_comment = next(f for f in act if f.__name__ == "post_inline_comment")
 
     ledger.commentable["a.py"] = {10, 11, 12}
-    result = post_inline_comment("a.py", 99, "Unhandled error", "CONTRIBUTING.md: handle errors")
+    ledger.add_evidence("Handle every error at the boundary.")
+    result = post_inline_comment(
+        "defect", "a.py", 99, "Unhandled error", "CONTRIBUTING.md: 'handle every error at the boundary'"
+    )
 
     assert result["error"] == "line_not_in_diff"
     assert ledger.findings[0]["posted_as"] == "suppressed"
@@ -123,3 +126,145 @@ def test_capacity_errors_are_distinguished_from_bad_answers():
     assert root._is_capacity_error(RuntimeError("Resource exhausted. Try later."))
     assert not root._is_capacity_error(RuntimeError("404 NOT_FOUND"))
     assert not root._is_capacity_error(ValueError("bad json from model"))
+
+
+# --- the citation gate: what it actually enforces ---------------------------
+
+
+def test_a_citation_must_quote_something_the_agent_fetched():
+    """The gate the length check could not make: an invented rule reads exactly
+    like a real one, so the wording is matched against the fetched documents."""
+    ledger = root.ReviewLedger()
+    _, _, act = _tools(ledger)
+    post_inline_comment = next(f for f in act if f.__name__ == "post_inline_comment")
+
+    ledger.commentable["a.py"] = {10}
+    ledger.add_evidence("Every outbound call must check the status before parsing the body.")
+
+    result = post_inline_comment(
+        "convention", "a.py", 10, "Response parsed without a status check",
+        "CONTRIBUTING.md: 'all responses must be validated against a schema'",
+    )
+
+    assert result["error"] == "citation_not_grounded"
+    assert ledger.posted_inline == 0
+    assert ledger.findings[0]["suppressed_reason"] == "citation_not_grounded"
+
+
+def test_a_verbatim_quote_survives_rewrapping_and_framing():
+    """A real quote must still pass after the model wraps it across lines and
+    prefixes the filename, or the gate would reject honest citations."""
+    evidence = "Every outbound call must check the status\nbefore parsing the body."
+    citation = "CONTRIBUTING.md: 'every outbound call must check the status before parsing the body'"
+    assert github_write.citation_is_grounded(citation, evidence)
+
+
+def test_nothing_can_be_cited_when_no_evidence_was_gathered():
+    """A repo with no written conventions makes every finding low-confidence by
+    definition — the gate has to say so rather than trusting the wording."""
+    assert not github_write.citation_is_grounded("CONTRIBUTING.md: 'some plausible rule'", "")
+
+
+def test_findings_are_recorded_with_their_class_not_as_unknown():
+    """The Firestore contract types every finding; the ledger used to stamp them
+    all "unknown", so the taxonomy existed only in the prompt."""
+    ledger = root.ReviewLedger()
+    _, _, act = _tools(ledger)
+    post_inline_comment = next(f for f in act if f.__name__ == "post_inline_comment")
+
+    ledger.commentable["a.py"] = {10}
+    ledger.add_evidence("Close every file handle you open.")
+    result = post_inline_comment(
+        "not_a_real_class", "a.py", 10, "Leaks a handle", "CONTRIBUTING.md: 'close every file handle you open'"
+    )
+
+    assert result["error"] == "unknown_finding_type"
+    assert ledger.findings[0]["suppressed_reason"] == "unknown_finding_type"
+
+
+def test_summary_observations_become_typed_findings():
+    """One row per observation, not one row per comment: a summary comment is
+    not itself a finding."""
+    ledger = root.ReviewLedger()
+    _, _, act = _tools(ledger)
+    post_summary_comment = next(f for f in act if f.__name__ == "post_summary_comment")
+
+    posted = {}
+    github_write_post = github_write.post_summary_comment
+    try:
+        github_write.post_summary_comment = lambda *a, **k: posted.setdefault("r", {"comment_id": 99})
+        post_summary_comment(
+            "Two questions about this change.",
+            [
+                {"type": "test_gap", "path": "a.py", "line": 4, "summary": "New branch has no test?"},
+                {"type": "defect", "path": "b.py", "line": 9, "summary": "Timeout intentional?"},
+            ],
+        )
+    finally:
+        github_write.post_summary_comment = github_write_post
+
+    assert [f["type"] for f in ledger.findings] == ["test_gap", "defect"]
+    assert {f["posted_as"] for f in ledger.findings} == {"summary"}
+    assert {f["confidence"] for f in ledger.findings} == {"low"}
+    assert all(f["comment_id"] == 99 for f in ledger.findings)
+
+
+# --- the escalation decision, recorded rather than implied -------------------
+
+
+def test_escalation_reasons_are_distinguished_from_each_other():
+    """Four situations used to collapse into a bare "escalated_to_human"."""
+    empty = root.ReviewLedger()
+    assert empty.why_escalated == "no_findings"
+
+    suppressed = root.ReviewLedger()
+    suppressed.record(type="defect", posted_as="suppressed", suppressed_reason="line_not_in_diff")
+    assert suppressed.why_escalated == "all_findings_suppressed"
+
+    uncitable = root.ReviewLedger()
+    uncitable.record(type="defect", posted_as="summary", confidence="low")
+    assert uncitable.why_escalated == "no_conventions_to_cite"
+
+    cited = root.ReviewLedger()
+    cited.add_evidence("Some written rule.")
+    cited.record(type="defect", posted_as="summary", confidence="low")
+    assert cited.why_escalated == "no_citable_findings"
+
+
+def test_a_completed_review_has_no_escalation_reason():
+    ledger = root.ReviewLedger()
+    ledger.record(type="defect", posted_as="inline", confidence="high")
+    assert ledger.outcome == "changes_requested"
+    assert ledger.why_escalated is None
+
+
+def test_the_agents_stated_reason_wins_over_the_derived_one():
+    ledger = root.ReviewLedger()
+    _, _, act = _tools(ledger)
+    assign_reviewer = next(f for f in act if f.__name__ == "assign_reviewer")
+
+    calls = {}
+    original = github_write.assign_reviewer
+    try:
+        github_write.assign_reviewer = lambda *a, **k: calls.setdefault("r", {"assigned": ["octocat"]})
+        assign_reviewer(["octocat"], "diff truncated at 400 files")
+    finally:
+        github_write.assign_reviewer = original
+
+    assert ledger.why_escalated == "diff truncated at 400 files"
+
+
+def test_decision_is_a_complete_audit_trail():
+    """What gets persisted and logged: how it landed, not just where."""
+    ledger = root.ReviewLedger()
+    ledger.add_evidence("A written rule.")
+    ledger.record(type="defect", posted_as="inline", confidence="high")
+    ledger.record(type="convention", posted_as="suppressed", suppressed_reason="citation_not_grounded")
+
+    decision = ledger.decision
+    assert decision["outcome"] == "changes_requested"
+    assert decision["posted_as"] == {"inline": 1, "suppressed": 1}
+    assert decision["by_type"] == {"defect": 1, "convention": 1}
+    assert decision["suppressed_reasons"] == {"citation_not_grounded": 1}
+    assert decision["evidence_sources"] == 1
+    assert decision["escalation_reason"] is None

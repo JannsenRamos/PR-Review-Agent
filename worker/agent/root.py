@@ -16,6 +16,7 @@ import os
 import uuid
 
 from config import (
+    FINDING_TYPES,
     GEMINI_MODEL,
     GCP_PROJECT,
     OUTCOME_CHANGES_REQUESTED,
@@ -74,9 +75,20 @@ class ReviewLedger:
         self.findings: list[dict] = []
         self.commentable: dict[str, set[int]] = {}
         self.added: dict[str, set[int]] = {}
+        # Everything the agent actually fetched that a citation may quote. A
+        # citation is only checkable against text we know it read.
+        self.evidence: list[str] = []
+        self.escalation_reason: str | None = None
 
     def record(self, **finding) -> None:
         self.findings.append(finding)
+
+    def add_evidence(self, *texts: str | None) -> None:
+        self.evidence.extend(t for t in texts if t)
+
+    @property
+    def evidence_text(self) -> str:
+        return "\n".join(self.evidence)
 
     @property
     def posted_inline(self) -> int:
@@ -85,6 +97,52 @@ class ReviewLedger:
     @property
     def outcome(self) -> str:
         return OUTCOME_CHANGES_REQUESTED if self.posted_inline else OUTCOME_ESCALATED
+
+    def _counts(self, key: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for f in self.findings:
+            value = f.get(key)
+            if value:
+                counts[value] = counts.get(value, 0) + 1
+        return counts
+
+    @property
+    def why_escalated(self) -> str | None:
+        """Why no inline comment was posted, in one machine-readable token.
+
+        Four different situations previously collapsed into the same bare
+        "escalated_to_human" with nothing to distinguish them: a diff too large
+        to read, a repo with no written conventions, a model that found nothing,
+        and findings that were all rejected by the gate. They call for different
+        responses from the human picking it up, so they are recorded apart.
+        """
+        if self.posted_inline:
+            return None
+        if self.escalation_reason:
+            return self.escalation_reason
+        if not self.findings:
+            return "no_findings"
+        if not any(f.get("posted_as") == "summary" for f in self.findings):
+            return "all_findings_suppressed"
+        if not self.evidence:
+            return "no_conventions_to_cite"
+        return "no_citable_findings"
+
+    @property
+    def decision(self) -> dict:
+        """The audit trail for how this review landed where it did.
+
+        Persisted and logged, so "why did it escalate" is answerable from the
+        record rather than by re-reading the model's prose.
+        """
+        return {
+            "outcome": self.outcome,
+            "posted_as": self._counts("posted_as"),
+            "by_type": self._counts("type"),
+            "suppressed_reasons": self._counts("suppressed_reason"),
+            "evidence_sources": len(self.evidence),
+            "escalation_reason": self.why_escalated,
+        }
 
 
 def _bind_tools(repo: str, pr_number: int, head_sha: str, installation_id, ledger: ReviewLedger):
@@ -121,7 +179,9 @@ def _bind_tools(repo: str, pr_number: int, head_sha: str, installation_id, ledge
         A null result means no conventions are written down, which makes every
         convention finding low-confidence by definition.
         """
-        return github_read.fetch_guidelines(repo, head_sha, installation_id)
+        result = github_read.fetch_guidelines(repo, head_sha, installation_id)
+        ledger.add_evidence(result.get("contributing"), result.get("lint_config"))
+        return result
 
     def fetch_past_reviews(paths: list[str]) -> dict:
         """Fetch previous review findings on these files in this repo.
@@ -129,73 +189,131 @@ def _bind_tools(repo: str, pr_number: int, head_sha: str, installation_id, ledge
         A prior comment on the same file is a valid citation: it shows the point
         has been raised before and was not a one-off opinion.
         """
-        return _fetch_past_reviews(repo, paths, PAST_REVIEW_LIMIT)
+        result = _fetch_past_reviews(repo, paths, PAST_REVIEW_LIMIT)
+        for review in result.get("reviews", []):
+            for finding in review.get("findings", []):
+                ledger.add_evidence(finding.get("summary"), finding.get("citation"))
+        return result
 
     def fetch_ci_status() -> dict:
         """Read the CI check results for this commit. Never re-runs anything."""
         return github_read.fetch_ci_status(repo, head_sha, installation_id)
 
     # --- phase 3: act -------------------------------------------------------
-    def post_inline_comment(path: str, line: int, body: str, citation: str) -> dict:
+    def post_inline_comment(
+        finding_type: str, path: str, line: int, body: str, citation: str
+    ) -> dict:
         """Post one comment anchored to a specific line, for a HIGH-confidence finding.
 
+        finding_type must be one of "defect", "convention" or "test_gap" —
+        nothing else is a finding.
+
         Requires a citation: a verbatim quote from CONTRIBUTING.md or the lint
-        config, or a prior review comment on this file. A finding you believe but
-        cannot cite is not a high-confidence finding — put it in the summary
-        comment instead.
+        config, or a prior review comment on this file. Quote it word for word;
+        the wording is checked against the documents you fetched, and a rule
+        that is not in them will be rejected. A finding you believe but cannot
+        quote is not a high-confidence finding — put it in the summary comment
+        instead.
 
         The line must be one this pull request added or touched. On any error,
         move the finding to the summary comment; do not retry the same call.
         """
+        def suppress(reason: str) -> None:
+            ledger.record(
+                type=kind, path=path, line=line, summary=body,
+                citation=citation, confidence="high", posted_as="suppressed",
+                suppressed_reason=reason,
+            )
+
+        kind = finding_type if finding_type in FINDING_TYPES else "unknown"
+        if kind == "unknown":
+            suppress("unknown_finding_type")
+            return {
+                "error": "unknown_finding_type",
+                "detail": f"finding_type must be one of {', '.join(FINDING_TYPES)}.",
+            }
+
         allowed = ledger.commentable.get(path)
         if allowed is not None and line not in allowed:
-            ledger.record(
-                type="unknown", path=path, line=line, summary=body,
-                citation=citation, confidence="high", posted_as="suppressed",
-                suppressed_reason="line_not_in_diff",
-            )
+            suppress("line_not_in_diff")
             return {
                 "error": "line_not_in_diff",
                 "detail": f"Line {line} of {path} is not part of this diff. Use the summary comment.",
+            }
+
+        # The gate that makes the citation requirement real: the quote has to
+        # appear in something this agent actually fetched. Checked here rather
+        # than in the prompt, and on content rather than on length — a rule the
+        # model invented reads exactly like a rule it read.
+        if not github_write.citation_is_grounded(citation, ledger.evidence_text):
+            suppress("citation_not_grounded")
+            return {
+                "error": "citation_not_grounded",
+                "detail": (
+                    "That wording is not in the guidelines or past reviews you fetched. "
+                    "Quote a shorter span word for word, or move this to the summary "
+                    "comment as a question."
+                ),
             }
 
         result = github_write.post_inline_comment(
             repo, pr_number, head_sha, path, line, body, citation, installation_id
         )
         if "error" in result:
-            ledger.record(
-                type="unknown", path=path, line=line, summary=body,
-                citation=citation, confidence="high", posted_as="suppressed",
-                suppressed_reason=result["error"],
-            )
+            suppress(result["error"])
             return result
 
         ledger.record(
-            type="unknown", path=path, line=line, summary=body,
+            type=kind, path=path, line=line, summary=body,
             citation=citation, confidence="high", posted_as="inline",
             comment_id=result["comment_id"],
         )
         return result
 
-    def post_summary_comment(body: str) -> dict:
+    def post_summary_comment(body: str, observations: list[dict]) -> dict:
         """Post the single summary comment holding every LOW-confidence observation.
 
         Phrase each observation as a question. Call this at most once.
+
+        observations records the same points in structured form, one entry per
+        observation, each {"type", "path", "line", "summary"} — type being
+        "defect", "convention" or "test_gap". This is what a human reviewer
+        picking the PR up reads instead of re-parsing your prose, so it must
+        match what the comment body says.
         """
         result = github_write.post_summary_comment(repo, pr_number, body, installation_id)
-        ledger.record(
-            type="unknown", path=None, line=None, summary=body,
-            citation=None, confidence="low", posted_as="summary",
-            comment_id=result.get("comment_id"),
-        )
+        comment_id = result.get("comment_id")
+
+        # One ledger row per observation, not one per comment: the review event
+        # documents findings, and "a summary was posted" is not a finding. Falls
+        # back to a single untyped row if the model gave no structure.
+        for obs in observations or [{"summary": body}]:
+            kind = obs.get("type")
+            ledger.record(
+                type=kind if kind in FINDING_TYPES else "unknown",
+                path=obs.get("path"),
+                line=obs.get("line"),
+                summary=obs.get("summary") or body,
+                citation=None,
+                confidence="low",
+                posted_as="summary",
+                comment_id=comment_id,
+            )
         return result
 
     def request_changes(summary: str) -> dict:
         """Submit the review requesting changes. Use when you posted inline comments."""
         return github_write.request_changes(repo, pr_number, summary, installation_id)
 
-    def assign_reviewer(logins: list[str]) -> dict:
-        """Escalate to a human reviewer. Use when you could not review safely."""
+    def assign_reviewer(logins: list[str], reason: str) -> dict:
+        """Escalate to a human reviewer. Use when you could not review safely.
+
+        reason is a short phrase saying what stopped you — "diff truncated",
+        "no written conventions to cite", "found nothing in scope". It is stored
+        on the review event, so the person picking this up knows what you were
+        unsure about without reading the thread.
+        """
+        ledger.escalation_reason = (reason or "").strip()[:200] or "unspecified"
         return github_write.assign_reviewer(repo, pr_number, logins, installation_id)
 
     def apply_label(labels: list[str]) -> dict:
@@ -329,11 +447,19 @@ async def review_pull_request(
     finally:
         await runner.close()
 
+    decision = ledger.decision
     event = write_review_event(
-        repo, pr_number, head_sha, ledger.findings, ledger.outcome, ci_state
+        repo, pr_number, head_sha, ledger.findings, ledger.outcome, ci_state, decision
     )
+    # One line carrying the whole decision, so the demo can point at the log and
+    # say why the agent did what it did rather than that it did something.
     log.info(
-        "review complete %s#%s outcome=%s inline=%d doc=%s",
-        repo, pr_number, ledger.outcome, ledger.posted_inline, event.get("doc_id"),
+        "review complete %s#%s decision=%s doc=%s",
+        repo, pr_number, decision, event.get("doc_id"),
     )
-    return {"outcome": ledger.outcome, "findings": ledger.findings, **event}
+    return {
+        "outcome": ledger.outcome,
+        "findings": ledger.findings,
+        "decision": decision,
+        **event,
+    }

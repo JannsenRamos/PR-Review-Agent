@@ -72,6 +72,7 @@ def write_review_event(
     findings: list[dict],
     outcome: str,
     ci_state: str,
+    decision: dict | None = None,
 ) -> dict:
     event = {
         "repo": repo,
@@ -80,6 +81,10 @@ def write_review_event(
         "findings": findings,
         "outcome": outcome,
         "ci_state": ci_state,
+        # How the outcome was reached: counts by disposition and finding type,
+        # and why it escalated when it did. Additive to the documented shape - a
+        # cold reader that only knows the original fields is unaffected.
+        "decision": decision or {},
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
         "agent_version": AGENT_VERSION,
     }

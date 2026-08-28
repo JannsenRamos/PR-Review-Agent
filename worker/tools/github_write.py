@@ -7,6 +7,7 @@ the tool simply not existing, not by asking the model nicely.
 from __future__ import annotations
 
 import logging
+import re
 
 import httpx
 from github_auth import GITHUB_API, api_headers
@@ -14,6 +15,51 @@ from github_auth import GITHUB_API, api_headers
 log = logging.getLogger("worker.github_write")
 
 MIN_CITATION_CHARS = 12
+
+# Quote characters a model might wrap a citation in, straight and curly both.
+_QUOTES = "\"'`‘’“”"
+_QUOTED_SPAN = re.compile(f"[{_QUOTES}]([^{_QUOTES}]{{%d,}})" % MIN_CITATION_CHARS)
+_SOURCE_PREFIX = re.compile(r"^[\w./-]{1,60}\s*:\s*")
+
+
+def _normalize(text: str) -> str:
+    """Collapse everything that a faithful quote is allowed to differ in.
+
+    Line wrapping, smart quotes and trailing punctuation all change between the
+    document and the model's rendering of it without changing what was said.
+    Word order and word choice do not, which is exactly what we want to catch.
+    """
+    return re.sub(r"\W+", " ", text).strip().lower()
+
+
+def citation_claim(citation: str) -> str:
+    """The span of a citation that has to actually exist in the evidence.
+
+    Citations arrive as "CONTRIBUTING.md: 'the rule text'" — the filename is the
+    model's own framing, only the quoted part is a claim about a document. Fall
+    back to the whole string, minus any leading "source:" prefix, when nothing
+    is quoted.
+    """
+    spans = _QUOTED_SPAN.findall(citation)
+    if spans:
+        return max(spans, key=len)
+    return _SOURCE_PREFIX.sub("", citation.strip())
+
+
+def citation_is_grounded(citation: str, evidence: str) -> bool:
+    """True when the citation quotes text the agent actually fetched.
+
+    The length check alone let the model cite a rule that sounds like it came
+    from CONTRIBUTING.md and was never in it — which is the exact failure the
+    citation requirement exists to prevent. A wrapper that only counts
+    characters does not enforce the invariant, it just makes it look enforced.
+    """
+    if not evidence:
+        return False
+    claim = _normalize(citation_claim(citation))
+    if len(claim) < MIN_CITATION_CHARS:
+        return False
+    return claim in _normalize(evidence)
 
 
 def _post(path: str, installation_id, payload: dict) -> httpx.Response:

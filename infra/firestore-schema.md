@@ -29,6 +29,14 @@ a redelivered webhook produces no duplicate comments.
     }
   ],
   "outcome": "changes_requested | escalated_to_human | skipped_ci_red",
+  "decision": {
+    "outcome": "changes_requested",
+    "posted_as": { "inline": 2, "summary": 1, "suppressed": 1 },
+    "by_type": { "defect": 1, "convention": 2, "test_gap": 1 },
+    "suppressed_reasons": { "citation_not_grounded": 1 },
+    "evidence_sources": 2,
+    "escalation_reason": null
+  },
   "ci_state": "success | failure | pending",
   "timestamp": "2026-08-26T12:00:00Z",
   "agent_version": "v1.0.0"
@@ -43,6 +51,18 @@ a redelivered webhook produces no duplicate comments.
   keeping: it is the raw material for V1's Tier 3 feedback loop and for judging
   whether the gate is set too tight.
 - There is no `approved` outcome, and there never will be one.
+- `decision` is the audit trail for *how* the outcome was reached, added after
+  the first live run showed the event could say what happened but not why. It is
+  additive: a consumer that only knows the original fields is unaffected.
+- `decision.escalation_reason` is null on a completed review and otherwise names
+  what stopped it — the agent's own phrase when it escalated deliberately, or one
+  of `no_findings`, `all_findings_suppressed`, `no_conventions_to_cite`,
+  `no_citable_findings`, `ci_red_before_review`, `agent_run_failed`. These call
+  for different responses from the human picking the PR up, so a bare
+  `escalated_to_human` was not enough to act on.
+- `findings[].type` is written from the class the agent declares when it calls
+  the tool. It was previously always `"unknown"`: the taxonomy lived in the
+  prompt and nothing captured it.
 
 ## Index
 

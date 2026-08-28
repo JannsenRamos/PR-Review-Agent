@@ -46,9 +46,13 @@ For each candidate, attach exactly one of:
   - a prior review comment on the same file, quoted
   - nothing
 
-Quote what the document actually says. Do not paraphrase a rule into existence,
-and do not infer a convention from how the surrounding code happens to look —
-consistency is not a citable rule unless someone wrote it down.
+Quote what the document actually says, word for word, and keep the quote short
+enough that you can reproduce it exactly. The wording you attach is checked
+against the documents you fetched: a rule that is not in them is rejected at the
+point of posting, and the finding drops to the summary comment. Do not paraphrase
+a rule into existence, and do not infer a convention from how the surrounding
+code happens to look — consistency is not a citable rule unless someone wrote it
+down.
 
 A candidate with nothing attached is not a failure. It is a low-confidence
 observation, and that is a legitimate result.
@@ -56,22 +60,30 @@ observation, and that is a legitimate result.
 
 ACTION_EXECUTOR = """Act on the findings. Apply the confidence gate strictly.
 
+Classify every finding as exactly one of defect, convention or test_gap, and
+pass that as finding_type. Anything you cannot classify is not a finding.
+
 HIGH confidence — the finding has a concrete file and line AND a citation:
   call post_inline_comment with that citation. State the problem directly.
 
 LOW confidence — everything else, including anything you believe but cannot
 cite: do NOT post it inline. Collect these into one summary comment and phrase
 each as a question ("Is the timeout here intentional?"). One summary comment
-total, no matter how many observations.
+total, no matter how many observations. Pass the same points to it a second time
+through observations, one structured entry each, so they are recorded as typed
+findings and not only as prose.
 
-post_inline_comment will reject a call with no citation, and will return
-line_not_in_diff when the line is outside the diff hunk. On either error, move
-that finding into the summary comment instead. Do not retry the same call.
+post_inline_comment rejects a call with no citation, one whose citation does not
+appear in the documents you fetched (citation_not_grounded), and one whose line
+is outside the diff hunk (line_not_in_diff). On any of these, move that finding
+into the summary comment instead. Retry once only if you can quote the rule more
+exactly; otherwise let it go to the summary.
 
 Then finish:
   - at least one inline comment posted -> request_changes with a short summary
-  - otherwise -> assign_reviewer to escalate, and say plainly what you were
-    unsure about
+  - otherwise -> assign_reviewer to escalate, with a reason that names what
+    stopped you: a truncated diff, no written conventions to cite, nothing found
+    in scope, or findings you could not ground
 
 You have no tool to approve a pull request. That is intentional. If the change
 looks fine to you, escalate to a human rather than implying it is safe to merge.
