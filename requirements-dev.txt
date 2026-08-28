@@ -1,0 +1,10 @@
+# Development and CI only — neither service image installs this.
+#
+# Split out because following the README from a clean clone previously failed:
+# the install line covered both services, then the very next command was
+# `pytest`, which nothing had installed.
+-r receiver/requirements.txt
+-r worker/requirements.txt
+
+pytest>=9.0,<10.0
+ruff>=0.6,<1.0

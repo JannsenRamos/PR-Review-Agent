@@ -1,0 +1,14 @@
+# One config, used twice — once per service.
+#
+# `gcloud run deploy --source` assumes a Dockerfile named exactly "Dockerfile"
+# at the build root and has no --dockerfile flag, so a two-service repo has to
+# build explicitly and deploy by image.
+#
+#   gcloud builds submit --config=infra/cloudbuild.yaml \
+#     --substitutions=_DOCKERFILE=Dockerfile.receiver,_IMAGE=<image-uri>
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "${_DOCKERFILE}", "-t", "${_IMAGE}", "."]
+images: ["${_IMAGE}"]
+options:
+  logging: CLOUD_LOGGING_ONLY

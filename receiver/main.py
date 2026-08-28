@@ -15,7 +15,6 @@ import os
 
 import httpx
 from fastapi import FastAPI, Header, Request, Response
-
 from github_auth import GITHUB_API, api_headers
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -44,8 +43,10 @@ def publisher():
     return _publisher, _topic_path
 
 
-@app.get("/healthz")
-def healthz() -> dict[str, str]:
+# NOT /healthz: Google's frontend reserves that path on *.run.app and answers it
+# with its own 404 before the request ever reaches the container.
+@app.get("/health")
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 

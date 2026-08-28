@@ -3,7 +3,7 @@
 **Author:** [Founder]
 **Status:** Draft v2 — hackathon-bound
 **Deadline:** Aug 31, 2026, 5:00pm PDT — All Things Agentic Hackathon, Taskmaster track, Individual/Hobbyist category
-**Companion doc:** See `prd-v2-task-assigner-loop.md` for the closed-loop roadmap this PRD is designed to support later. V2 is not in scope for this build.
+**Companion doc:** See `prd-v2-task-assigner-loop.md` for the closed-loop roadmap this PRD is designed to support later. That document is design only — nothing in it is built, and V2 is not in scope for this build.
 
 ---
 

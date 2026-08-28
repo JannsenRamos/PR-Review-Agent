@@ -39,10 +39,14 @@ def fetch_past_reviews(repo: str, paths: list[str], limit: int = PAST_REVIEW_LIM
     link to create it the first time this runs.
     """
     try:
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        # FieldFilter, not positional args: the positional form is deprecated
+        # and warns on every call.
         query = (
             db()
             .collection(FIRESTORE_COLLECTION)
-            .where("repo", "==", repo)
+            .where(filter=FieldFilter("repo", "==", repo))
             .order_by("timestamp", direction="DESCENDING")
             .limit(limit * 4)
         )
@@ -68,6 +72,7 @@ def write_review_event(
     findings: list[dict],
     outcome: str,
     ci_state: str,
+    decision: dict | None = None,
 ) -> dict:
     event = {
         "repo": repo,
@@ -76,7 +81,11 @@ def write_review_event(
         "findings": findings,
         "outcome": outcome,
         "ci_state": ci_state,
-        "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+        # How the outcome was reached: counts by disposition and finding type,
+        # and why it escalated when it did. Additive to the documented shape - a
+        # cold reader that only knows the original fields is unaffected.
+        "decision": decision or {},
+        "timestamp": dt.datetime.now(dt.UTC).isoformat(),
         "agent_version": AGENT_VERSION,
     }
     try:

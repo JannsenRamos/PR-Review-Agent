@@ -48,18 +48,38 @@ Python **3.12** (not 3.14 — `google-adk` does not support it yet):
 
 ```bash
 py -3.12 -m venv .venv
-./.venv/Scripts/python.exe -m pip install -r receiver/requirements.txt -r worker/requirements.txt
+./.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
 ./.venv/Scripts/python.exe -m pytest tests/ -q
+./.venv/Scripts/python.exe -m ruff check .
 ```
 
 On macOS/Linux use `python3.12` and `.venv/bin/python`.
 
+`requirements-dev.txt` pulls in both services plus `pytest` and `ruff`. The two
+service requirements files are what the images install and contain no test
+tooling. CI installs the same dev file, so a green local run means a green CI
+run.
+
+On Windows, clone somewhere short (`C:\src\...`). Some dependencies exceed the
+260-character path limit when nested deeply, and pip fails with a long-path
+error that does not name the real cause.
+
 ### 2. GitHub App
 
-Create a GitHub App with **Pull requests: read & write**, **Checks: read**,
-**Contents: read**, subscribed to the **Pull request** event. Install it on the
-target repo. Keep the App ID, the generated private key `.pem`, and the webhook
-secret.
+Create a GitHub App with these repository permissions, subscribed to the
+**Pull request** event:
+
+| Permission | Level | Why |
+|---|---|---|
+| Pull requests | Read and write | inline comments, request changes, reviewers |
+| Issues | Read and write | summary comments and labels go through `/issues/{n}/...` |
+| Contents | Read-only | `CONTRIBUTING.md`, lint config, file context |
+| Checks | Read-only | the CI gate |
+| Metadata | Read-only | mandatory, auto-selected |
+
+Install it on the target repo. Keep the App ID, the generated private key
+`.pem`, and the webhook secret. The installation ID arrives in every webhook
+payload, so there is nothing to record for it.
 
 A Personal Access Token works as a fallback: set `GITHUB_PAT` instead of
 `GITHUB_APP_ID` + `GITHUB_PRIVATE_KEY`. `get_token()` picks the mode; nothing
@@ -82,31 +102,63 @@ printf %s "$WEBHOOK_SECRET" | gcloud secrets create github-webhook-secret --data
 gcloud secrets create github-private-key --data-file=path/to/app-key.pem
 ```
 
-Pin the model. Find the exact Gemini id available in your region and set it —
-the code deliberately has no default:
+Pin the model. There is no default anywhere in the codebase and `deploy.sh`
+aborts without one, on purpose: a plausible-but-wrong id deploys cleanly and
+fails at the first Vertex call, which is a far worse place to find out.
 
 ```bash
-gcloud ai models list --region=us-central1
-export GEMINI_MODEL=<exact-model-id>
+export GEMINI_MODEL=<exact-model-id>          # e.g. gemini-3.7-flash
 ```
+
+Listing publisher models is **not** a reliable availability check — the list
+happily returns models a given project cannot call. The only trustworthy probe
+is invoking one:
+
+```bash
+curl -H "Authorization: Bearer $(gcloud auth print-access-token)"   -H "Content-Type: application/json"   "https://aiplatform.googleapis.com/v1/projects/$GCP_PROJECT/locations/global/publishers/google/models/$GEMINI_MODEL:generateContent"   -d '{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}'
+```
+
+Note `locations/global`, not your Cloud Run region. Gemini 3.x is served from
+the global endpoint and 404s on `us-central1`; `VERTEX_LOCATION` defaults to
+`global` for this reason.
 
 ### 4. Deploy
 
 ```bash
 export GCP_PROJECT=your-project REGION=us-central1 GITHUB_APP_ID=123456
+export GEMINI_MODEL=<exact-model-id>          # required; the script exits without it
 bash infra/deploy.sh
 ```
 
 The script is idempotent — re-run it freely. It enables APIs, creates the topic,
-dead-letter topic and push subscription, grants the Pub/Sub service agent the
-roles it needs, and deploys both services. It prints the receiver URL; point the
-GitHub App's webhook at `<receiver-url>/webhook`.
+the dead-letter topic and its retention subscription, and the push subscription;
+builds both images through Cloud Build; deploys both services; and grants the
+IAM the push path needs. It prints the receiver URL; point the GitHub App's
+webhook at `<receiver-url>/webhook`.
+
+Two things that are easy to get wrong and cost an afternoon each:
+
+- The push request carries an OIDC token for the **push-auth service account**,
+  so that account needs `run.invoker` on the worker — not the Pub/Sub service
+  agent. Granting the wrong one gives an endless 403 loop on `/jobs` that never
+  reaches the application.
+- Google's frontend reserves `/healthz` on `*.run.app` and answers it with its
+  own 404 before the request reaches the container. Both services use `/health`.
 
 ### 5. Give it something to cite
 
-The target repo needs a `CONTRIBUTING.md`. The convention checker quotes it
-verbatim and will not invent a rule that is not written down, so a repo without
-one produces only low-confidence observations.
+The target repo needs a `CONTRIBUTING.md`, and benefits from a lint config
+(`.ruff.toml`, `pyproject.toml`, `.eslintrc.json`, `setup.cfg` or `.flake8`).
+These are the only documents an inline comment may be cited against.
+
+The citation requirement is enforced on content, not on wording: the quote must
+actually appear in a document the agent fetched during that run. A rule the
+model paraphrases into existence is rejected at the point of posting and falls
+back to the summary comment. So a repo with no written conventions produces only
+low-confidence observations — by construction, not by luck.
+
+Numbered rules work best. They are unambiguous to quote and easy to read back in
+a review comment.
 
 ## Local development
 
@@ -152,10 +204,47 @@ shared package to build and version.
 
 ## Status
 
-Pipeline, tools and prompts are scaffolded; the ADK agent wiring in
-`worker/agent/root.py` is the remaining piece. Until it exists, the worker posts
-a placeholder comment so the plumbing can be proven end to end without the model
-— see `run_review()` in `worker/main.py`.
+Deployed and running against real pull requests on this repository.
+
+Observed live, not asserted:
+
+| Behaviour | Evidence |
+|---|---|
+| Reviews a PR unattended | PR #2 — inline comments and a requested-changes review, no human in the loop |
+| Re-reviews against the new commit | The fixed finding disappeared on the next push; the rest stayed |
+| Labels the outcome | `agent-reviewed` + `changes-requested` applied by the agent |
+| Every inline comment is cited | Verbatim quotes of `CONTRIBUTING.md`, each checked against the fetched document |
+| Uncitable findings become questions | 2 observations in one summary comment, phrased as questions |
+| Red CI halts the review | PR #3 — halt comment, zero inline comments, nothing published to Pub/Sub |
+| Redelivery does not double-comment | PR #2 reopened at the same head SHA — `already reviewed`, comment count unchanged |
+| Never approves | 10 review documents — 8 `changes_requested`, 2 `escalated_to_human`, 0 approved |
+| Retrieves its own past reviews | `evidence_sources: 18` — prior findings on the same file pulled from Firestore into the evidence pool |
+| Escalates with a stated reason | A run that found nothing recorded `escalation_reason: "found nothing in scope"` |
+
+One nuance on memory: past reviews are retrieved and enter the evidence pool,
+but every inline citation so far quotes `CONTRIBUTING.md`. Where a written
+rule exists the agent prefers it, and a prior comment is the weaker citation —
+so this is the expected ordering rather than an unused path.
+
+Each review is persisted to Firestore in the shape documented in
+`infra/firestore-schema.md`, including a `decision` block recording how the
+outcome was reached and why it escalated when it did.
+
+**Known limitation.** All three finding classes are produced, but `test_gap` is
+weaker than it looks. The agent has no tool that can check whether a test exists,
+so a test-gap finding is an inference from the diff — it asserts "no test covers
+this" without looking. The citation gate does not catch that: it verifies the
+quoted *rule* is real, not that the *claim* about the repository is true.
+
+So a test-gap comment cites a genuine rule and may still be wrong about the
+facts. Local defects and convention violations do not have this problem — both
+are judged entirely from text the agent fetched. The fix is a narrow
+`file_exists` tool bound to the diff analyzer; it is scoped and not built.
+
+The test suite is offline by design and covers structure and guardrails — the
+absence of an approve tool, the citation gate, diff-position mapping, escalation
+reasons — not model behaviour. Anything needing a live model belongs in a demo
+run.
 
 ## Roadmap
 

@@ -20,7 +20,7 @@ GITHUB_API = os.environ.get("GITHUB_API", "https://api.github.com")
 
 # Installation tokens last an hour. Minting one costs a round trip, which the
 # receiver cannot afford on its hot path, so cache until shortly before expiry.
-_TOKEN_CACHE: dict[str, "_CachedToken"] = {}
+_TOKEN_CACHE: dict[str, _CachedToken] = {}
 _EXPIRY_MARGIN_S = 300
 
 

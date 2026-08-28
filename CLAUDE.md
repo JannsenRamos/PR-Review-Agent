@@ -4,7 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Scaffolded, not yet deployed. Receiver, worker plumbing, agent tools and prompts exist; `worker/agent/root.py` (the ADK wiring) does not. Until it does, `run_review()` in `worker/main.py` posts a placeholder comment so the pipeline can be proven without the model. `main` has no commits yet.
+Deployed and proven against real PRs on this repo (project `pr-review-agent-ajr`, Cloud Run `us-central1`). PR #2 produced a cited, unattended review; PR #3 proved the red-CI halt; reopening PR #2 proved idempotency. Ten review documents exist in Firestore - 8 `changes_requested`, 2 `escalated_to_human`, 0 approved. Tier 2 memory is proven: `evidence_sources: 18` on the latest run, i.e. `fetch_past_reviews` pulling prior findings on the same file into the evidence pool. Note the limit of that claim - every inline citation so far quotes `CONTRIBUTING.md`, never a past review comment, because a written rule outranks a prior comment whenever one exists. Do not read the retrieval as unused.
+
+Known limitation: all three finding classes are produced — `test_gap` findings appear, cited against CONTRIBUTING.md rule 11 — but the agent has no tool that can check whether a test exists, so "no test covers this" is an inference it cannot verify. The citation gate does not catch it: the gate proves the quoted rule is real, not that the claim about the repo is true. The fix is a `file_exists` tool bound to the diff analyzer, not a looser prompt.
+
+The citation gate checks **provenance, not length**: a quote must appear in a document fetched during that run (`citation_is_grounded` in `worker/tools/github_write.py`). Backticks are deliberately not treated as quote delimiters — treating them as such shredded rules containing inline code and rejected correct citations.
+
+Agent tools are bound as closures over the PR context (`_bind_tools` in `worker/agent/root.py`), so the model supplies only `finding_type`, `path`, `line`, `body` and `citation` and cannot get the repo or commit SHA wrong. `ReviewLedger` records what the agent *did* — built from real tool calls, not from the model's closing summary — and that ledger is what gets persisted.
+
+ADK 2.7 deprecates `SequentialAgent` in favour of `Workflow`. Deliberately not migrated; the rationale is in `root.py` next to the call.
 
 Source of truth for what is being built:
 
@@ -54,8 +62,9 @@ Windows paths shown; on macOS/Linux use `.venv/bin/python`.
 
 ```bash
 py -3.12 -m venv .venv                                  # 3.12 only — see below
-./.venv/Scripts/python.exe -m pip install -r receiver/requirements.txt -r worker/requirements.txt
+./.venv/Scripts/python.exe -m pip install -r requirements-dev.txt   # both services + pytest + ruff
 ./.venv/Scripts/python.exe -m pytest tests/ -q          # all tests
+./.venv/Scripts/python.exe -m ruff check .              # lint; CI runs this too
 ./.venv/Scripts/python.exe -m pytest tests/test_diff_positions.py::test_multiple_hunks_restart_numbering -q
 bash infra/deploy.sh                                    # idempotent; needs GCP_PROJECT, REGION
 ```
@@ -74,9 +83,10 @@ GITHUB_WEBHOOK_SECRET=x ./.venv/Scripts/python.exe scripts/replay.py fixtures/pu
 Verified on this machine, Aug 26 2026:
 
 - **Use Python 3.12** (`py -3.12`). The default `python` is 3.14.2; `google-adk` 2.7.1 installs and imports cleanly on 3.12, which is what `.venv` and both Dockerfiles use.
-- **`gcloud` is not installed.** Nothing deploys until the Google Cloud CLI is installed and both `gcloud auth login` and `gcloud auth application-default login` have run.
+- **`gcloud` 582.0.0 is installed** at `%LOCALAPPDATA%\Google\Cloud SDK\google-cloud-sdk\bin`, authenticated. A shell started before the install will not have it on PATH — prepend that directory rather than asking for a session restart.
+- **`gcloud auth application-default login` has NOT been run.** Without ADC, any local Python touching Vertex or Firestore fails with a SERVICE_DISABLED error naming project 32555940559 (gcloud's shared client project), which is misleading — the real cause is missing ADC and no quota project.
 - Available: node 24.13.0, gh 2.97.0, docker 29.1.3, git 2.42.0.
-- **`GEMINI_MODEL` has no default on purpose.** Resolve the exact ID available in the project's Vertex AI region (`gcloud ai models list --region=...`) and set it in the environment. Never guess a model ID.
+- **`GEMINI_MODEL` has no default on purpose.** Resolve the exact ID available in the project's Vertex AI region (`gcloud ai model-garden models list | grep gemini`) and set it in the environment. Never guess a model ID.
 - Requirements are loosely bounded pending a first clean install; `pip freeze` into them once the stack is proven.
 
 ## Working practices
