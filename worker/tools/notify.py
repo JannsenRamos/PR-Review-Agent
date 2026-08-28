@@ -27,7 +27,7 @@ def notify_review(event: dict) -> dict:
     message = _summarize(event)
     log.info(f"notifying slack about {event['repo']}")
 
-    response = httpx.post(slack_webhook, json={"text": message})
+    response = httpx.post(slack_webhook, json={"text": message}, timeout=10.0)
     body = response.json()
 
     if body.get("ok") is False:
