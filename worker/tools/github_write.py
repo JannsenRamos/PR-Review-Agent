@@ -17,7 +17,11 @@ log = logging.getLogger("worker.github_write")
 MIN_CITATION_CHARS = 12
 
 # Quote characters a model might wrap a citation in, straight and curly both.
-_QUOTES = "\"'`‘’“”"
+# Deliberately NOT the backtick: it delimits inline code, and a rule like
+# "Log messages use lazy `%s` formatting" is mostly code. Treating it as a quote
+# splits the citation into fragments too short to check, and a correct verbatim
+# quote gets rejected - seen on the first live run of this gate.
+_QUOTES = "\"'‘’“”"
 _QUOTED_SPAN = re.compile(f"[{_QUOTES}]([^{_QUOTES}]{{%d,}})" % MIN_CITATION_CHARS)
 _SOURCE_PREFIX = re.compile(r"^[\w./-]{1,60}\s*:\s*")
 
@@ -56,10 +60,15 @@ def citation_is_grounded(citation: str, evidence: str) -> bool:
     """
     if not evidence:
         return False
-    claim = _normalize(citation_claim(citation))
-    if len(claim) < MIN_CITATION_CHARS:
-        return False
-    return claim in _normalize(evidence)
+    haystack = _normalize(evidence)
+    # The quoted span first, then the whole citation: extraction is a heuristic
+    # about where the model put the quote, and a heuristic must never be the
+    # reason a genuine quote is refused.
+    for candidate in (citation_claim(citation), citation):
+        claim = _normalize(candidate)
+        if len(claim) >= MIN_CITATION_CHARS and claim in haystack:
+            return True
+    return False
 
 
 def _post(path: str, installation_id, payload: dict) -> httpx.Response:

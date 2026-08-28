@@ -268,3 +268,15 @@ def test_decision_is_a_complete_audit_trail():
     assert decision["suppressed_reasons"] == {"citation_not_grounded": 1}
     assert decision["evidence_sources"] == 1
     assert decision["escalation_reason"] is None
+
+
+def test_a_rule_full_of_inline_code_is_still_checkable():
+    """Regression, from the first live run of the gate: backticks were treated
+    as quote delimiters, so a verbatim quote of rule 9 was shredded into
+    fragments too short to match and a correct citation was refused."""
+    evidence = (
+        "9. Log messages use lazy `%s` formatting - `log.info(\"saw %s\", x)`, not\n"
+        "   `log.info(f\"saw {{x}}\")`."
+    )
+    citation = "Log messages use lazy `%s` formatting - `log.info(\"saw %s\", x)`, not\n`log.info(f\"saw {{x}}\")`."
+    assert github_write.citation_is_grounded(citation, evidence)
