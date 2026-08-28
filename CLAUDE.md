@@ -4,9 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Code complete for V1, not yet deployed — nothing has run against a real PR or a real model. Receiver, worker, all three ADK sub-agents and their tools exist and are covered by offline tests. What remains is entirely environmental: install `gcloud`, register the GitHub App, pin `GEMINI_MODEL`, run `infra/deploy.sh`.
+Deployed and proven against real PRs on this repo (project `pr-review-agent-ajr`, Cloud Run `us-central1`). PR #2 produced a cited, unattended review; PR #3 proved the red-CI halt; reopening PR #2 proved idempotency. Five review documents exist in Firestore, all `changes_requested` or `escalated_to_human`.
 
-Agent tools are bound as closures over the PR context (`_bind_tools` in `worker/agent/root.py`), so the model supplies only `path`, `line`, `body` and `citation` and cannot get the repo or commit SHA wrong. `ReviewLedger` records what the agent *did* — built from real tool calls, not from the model's closing summary — and that ledger is what gets persisted.
+Known limitation: `test_gap` is one of three declared finding classes but no tool can check whether a test exists, so the agent cannot reliably produce it. Do not "fix" this by loosening the prompt — it needs a tool (`file_exists` or similar) bound to the diff analyzer.
+
+The citation gate checks **provenance, not length**: a quote must appear in a document fetched during that run (`citation_is_grounded` in `worker/tools/github_write.py`). Backticks are deliberately not treated as quote delimiters — treating them as such shredded rules containing inline code and rejected correct citations.
+
+Agent tools are bound as closures over the PR context (`_bind_tools` in `worker/agent/root.py`), so the model supplies only `finding_type`, `path`, `line`, `body` and `citation` and cannot get the repo or commit SHA wrong. `ReviewLedger` records what the agent *did* — built from real tool calls, not from the model's closing summary — and that ledger is what gets persisted.
 
 ADK 2.7 deprecates `SequentialAgent` in favour of `Workflow`. Deliberately not migrated; the rationale is in `root.py` next to the call.
 
@@ -58,8 +62,9 @@ Windows paths shown; on macOS/Linux use `.venv/bin/python`.
 
 ```bash
 py -3.12 -m venv .venv                                  # 3.12 only — see below
-./.venv/Scripts/python.exe -m pip install -r receiver/requirements.txt -r worker/requirements.txt
+./.venv/Scripts/python.exe -m pip install -r requirements-dev.txt   # both services + pytest + ruff
 ./.venv/Scripts/python.exe -m pytest tests/ -q          # all tests
+./.venv/Scripts/python.exe -m ruff check .              # lint; CI runs this too
 ./.venv/Scripts/python.exe -m pytest tests/test_diff_positions.py::test_multiple_hunks_restart_numbering -q
 bash infra/deploy.sh                                    # idempotent; needs GCP_PROJECT, REGION
 ```
