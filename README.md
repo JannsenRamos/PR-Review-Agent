@@ -215,17 +215,24 @@ Observed live, not asserted:
 | Uncitable findings become questions | 2 observations in one summary comment, phrased as questions |
 | Red CI halts the review | PR #3 — halt comment, zero inline comments, nothing published to Pub/Sub |
 | Redelivery does not double-comment | PR #2 reopened at the same head SHA — `already reviewed`, comment count unchanged |
-| Never approves | 5 review documents, all `changes_requested` or `escalated_to_human` |
+| Never approves | 7 review documents, all `changes_requested` or `escalated_to_human` |
+| Remembers past reviews | `evidence_sources: 11` — `fetch_past_reviews` returning prior findings on the same files |
+| Escalates with a stated reason | A run that found nothing recorded `escalation_reason: "found nothing in scope"` |
 
 Each review is persisted to Firestore in the shape documented in
 `infra/firestore-schema.md`, including a `decision` block recording how the
 outcome was reached and why it escalated when it did.
 
-**Known limitation.** Of the three declared finding classes, `test_gap` is not
-reliably produced: the agent has no tool that can determine whether a test
-covering a new branch exists, so it would have to guess at file paths. Local
-defects and convention violations work. This is stated rather than papered over —
-the taxonomy is in the PRD and the prompt, and the gap is real.
+**Known limitation.** All three finding classes are produced, but `test_gap` is
+weaker than it looks. The agent has no tool that can check whether a test exists,
+so a test-gap finding is an inference from the diff — it asserts "no test covers
+this" without looking. The citation gate does not catch that: it verifies the
+quoted *rule* is real, not that the *claim* about the repository is true.
+
+So a test-gap comment cites a genuine rule and may still be wrong about the
+facts. Local defects and convention violations do not have this problem — both
+are judged entirely from text the agent fetched. The fix is a narrow
+`file_exists` tool bound to the diff analyzer; it is scoped and not built.
 
 The test suite is offline by design and covers structure and guardrails — the
 absence of an approve tool, the citation gate, diff-position mapping, escalation

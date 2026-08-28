@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Deployed and proven against real PRs on this repo (project `pr-review-agent-ajr`, Cloud Run `us-central1`). PR #2 produced a cited, unattended review; PR #3 proved the red-CI halt; reopening PR #2 proved idempotency. Five review documents exist in Firestore, all `changes_requested` or `escalated_to_human`.
+Deployed and proven against real PRs on this repo (project `pr-review-agent-ajr`, Cloud Run `us-central1`). PR #2 produced a cited, unattended review; PR #3 proved the red-CI halt; reopening PR #2 proved idempotency. Seven review documents exist in Firestore, all `changes_requested` or `escalated_to_human`. Tier 2 memory is proven: later runs show `evidence_sources: 11`, i.e. `fetch_past_reviews` returning prior findings on the same paths.
 
-Known limitation: `test_gap` is one of three declared finding classes but no tool can check whether a test exists, so the agent cannot reliably produce it. Do not "fix" this by loosening the prompt — it needs a tool (`file_exists` or similar) bound to the diff analyzer.
+Known limitation: all three finding classes are produced — `test_gap` findings appear, cited against CONTRIBUTING.md rule 11 — but the agent has no tool that can check whether a test exists, so "no test covers this" is an inference it cannot verify. The citation gate does not catch it: the gate proves the quoted rule is real, not that the claim about the repo is true. The fix is a `file_exists` tool bound to the diff analyzer, not a looser prompt.
 
 The citation gate checks **provenance, not length**: a quote must appear in a document fetched during that run (`citation_is_grounded` in `worker/tools/github_write.py`). Backticks are deliberately not treated as quote delimiters — treating them as such shredded rules containing inline code and rejected correct citations.
 

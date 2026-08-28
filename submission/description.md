@@ -51,7 +51,9 @@ asserted from the code:
 | Uncitable findings become questions | 2 observations in a single summary comment |
 | Red CI halts the review | PR #3 — halt comment, zero inline comments, nothing published to the queue |
 | Redelivery does not double-comment | PR #2 reopened at the same head SHA — deduped, comment count unchanged |
-| Never approves | 5 persisted reviews, all `changes_requested` or `escalated_to_human` |
+| Never approves | 7 persisted reviews, all `changes_requested` or `escalated_to_human` |
+| Remembers past reviews | `evidence_sources: 11` — prior findings on the same files retrieved from Firestore and used as evidence |
+| Escalates with a stated reason | A run that legitimately found nothing recorded `escalation_reason: "found nothing in scope"` |
 
 The agent also found a defect on PR #2 that was not planted: the code called
 `response.json()` on a Slack webhook reply, which returns plain text. It raised
@@ -137,11 +139,24 @@ produces a 403 loop that never reaches the application and looks like an app bug
 
 ## Known limitation
 
-Of the three declared finding classes, `test_gap` is not reliably produced. The
-agent has no tool that can determine whether a test covering a new branch exists,
-so it would have to guess at file paths and infer absence from an error. Local
-defects and convention violations work. The honest fix is a narrow `file_exists`
-tool bound to the diff analyzer; it is scoped and not built.
+All three finding classes are produced — test-gap findings appear in live
+reviews, cited against the target repo's written rule that a new branch needs a
+test. But that class is weaker than it looks, and the weakness is worth naming
+precisely.
+
+The agent has no tool that can check whether a test exists. So when it reports a
+test gap it is inferring absence from the diff, asserting "no test covers this"
+without having looked. The citation gate does not catch this, and cannot: the
+gate proves the quoted *rule* is real, not that the *claim* about the repository
+is true.
+
+A test-gap comment therefore cites a genuine rule and may still be wrong about
+the facts. Local defects and convention violations do not share the problem —
+both are judged entirely from text the agent fetched during the run. The fix is a
+narrow `file_exists` tool bound to the diff analyzer; it is scoped and not built.
+
+This is the sharpest thing I learned about the citation gate: verifying that
+evidence is real is not the same as verifying that a conclusion follows from it.
 
 ## Roadmap — explicitly not built
 
