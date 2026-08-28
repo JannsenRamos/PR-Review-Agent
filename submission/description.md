@@ -46,19 +46,25 @@ asserted from the code:
 
 | Behaviour | Evidence |
 |---|---|
-| Reviews unattended | PR #2 — 6 inline comments and a requested-changes review, no human in the loop |
-| Every inline comment is cited | 6 verbatim quotes of `CONTRIBUTING.md`, each verified against the fetched document |
+| Reviews unattended | PR #2 — inline comments and a requested-changes review, no human in the loop |
+| Re-reviews against the new commit | Pushing the requested fix removed that finding and left the others |
+| Labels the outcome | `agent-reviewed` + `changes-requested`, applied by the agent |
+| Every inline comment is cited | Verbatim quotes of `CONTRIBUTING.md`, each verified against the fetched document |
 | Uncitable findings become questions | 2 observations in a single summary comment |
 | Red CI halts the review | PR #3 — halt comment, zero inline comments, nothing published to the queue |
 | Redelivery does not double-comment | PR #2 reopened at the same head SHA — deduped, comment count unchanged |
-| Never approves | 7 persisted reviews, all `changes_requested` or `escalated_to_human` |
-| Remembers past reviews | `evidence_sources: 11` — prior findings on the same files retrieved from Firestore and used as evidence |
+| Never approves | 10 persisted reviews — 8 `changes_requested`, 2 `escalated_to_human`, 0 approved |
+| Retrieves its own past reviews | `evidence_sources: 18` — prior findings on the same file pulled from Firestore into the evidence pool |
 | Escalates with a stated reason | A run that legitimately found nothing recorded `escalation_reason: "found nothing in scope"` |
 
 The agent also found a defect on PR #2 that was not planted: the code called
 `response.json()` on a Slack webhook reply, which returns plain text. It raised
 that as a question rather than an assertion, because no written rule covered it —
 which is exactly what the confidence gate is for.
+
+Memory is retrieved and used as evidence; every inline citation so far still
+quotes `CONTRIBUTING.md`, because a written rule outranks a prior comment
+wherever one exists. Worth stating precisely rather than implying more.
 
 ## Stack
 
@@ -168,3 +174,12 @@ every *mechanical* step is agent-owned and every *judgment* step stays human.
 Firestore review document is written as a standalone, documented event
 (`infra/firestore-schema.md`) that a future consumer could read cold. No queue,
 API or plugin interface was built for it.
+
+The design is written down rather than hand-waved — `PRD/prd-v2-task-assigner-loop.md`
+covers the trigger, the classification, the non-goals it inherits from V1, and
+the four questions that are genuinely unresolved: where the system of record
+lives, which feedback source to start with, what importance can honestly be cited
+against, and how to deduplicate a complaint semantically when V1's exact
+idempotency key has no equivalent. It also states the limit of what V1 hands
+forward: the review documents describe code review, not user feedback, so V2's
+primary input does not exist yet.

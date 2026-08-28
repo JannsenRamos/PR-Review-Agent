@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Deployed and proven against real PRs on this repo (project `pr-review-agent-ajr`, Cloud Run `us-central1`). PR #2 produced a cited, unattended review; PR #3 proved the red-CI halt; reopening PR #2 proved idempotency. Seven review documents exist in Firestore, all `changes_requested` or `escalated_to_human`. Tier 2 memory is proven: later runs show `evidence_sources: 11`, i.e. `fetch_past_reviews` returning prior findings on the same paths.
+Deployed and proven against real PRs on this repo (project `pr-review-agent-ajr`, Cloud Run `us-central1`). PR #2 produced a cited, unattended review; PR #3 proved the red-CI halt; reopening PR #2 proved idempotency. Ten review documents exist in Firestore - 8 `changes_requested`, 2 `escalated_to_human`, 0 approved. Tier 2 memory is proven: `evidence_sources: 18` on the latest run, i.e. `fetch_past_reviews` pulling prior findings on the same file into the evidence pool. Note the limit of that claim - every inline citation so far quotes `CONTRIBUTING.md`, never a past review comment, because a written rule outranks a prior comment whenever one exists. Do not read the retrieval as unused.
 
 Known limitation: all three finding classes are produced — `test_gap` findings appear, cited against CONTRIBUTING.md rule 11 — but the agent has no tool that can check whether a test exists, so "no test covers this" is an inference it cannot verify. The citation gate does not catch it: the gate proves the quoted rule is real, not that the claim about the repo is true. The fix is a `file_exists` tool bound to the diff analyzer, not a looser prompt.
 

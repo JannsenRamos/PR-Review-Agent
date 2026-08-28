@@ -210,14 +210,21 @@ Observed live, not asserted:
 
 | Behaviour | Evidence |
 |---|---|
-| Reviews a PR unattended | PR #2 — 6 inline comments and a requested-changes review, no human in the loop |
-| Every inline comment is cited | 6 verbatim quotes of `CONTRIBUTING.md`, each checked against the fetched document |
+| Reviews a PR unattended | PR #2 — inline comments and a requested-changes review, no human in the loop |
+| Re-reviews against the new commit | The fixed finding disappeared on the next push; the rest stayed |
+| Labels the outcome | `agent-reviewed` + `changes-requested` applied by the agent |
+| Every inline comment is cited | Verbatim quotes of `CONTRIBUTING.md`, each checked against the fetched document |
 | Uncitable findings become questions | 2 observations in one summary comment, phrased as questions |
 | Red CI halts the review | PR #3 — halt comment, zero inline comments, nothing published to Pub/Sub |
 | Redelivery does not double-comment | PR #2 reopened at the same head SHA — `already reviewed`, comment count unchanged |
-| Never approves | 7 review documents, all `changes_requested` or `escalated_to_human` |
-| Remembers past reviews | `evidence_sources: 11` — `fetch_past_reviews` returning prior findings on the same files |
+| Never approves | 10 review documents — 8 `changes_requested`, 2 `escalated_to_human`, 0 approved |
+| Retrieves its own past reviews | `evidence_sources: 18` — prior findings on the same file pulled from Firestore into the evidence pool |
 | Escalates with a stated reason | A run that found nothing recorded `escalation_reason: "found nothing in scope"` |
+
+One nuance on memory: past reviews are retrieved and enter the evidence pool,
+but every inline citation so far quotes `CONTRIBUTING.md`. Where a written
+rule exists the agent prefers it, and a prior comment is the weaker citation —
+so this is the expected ordering rather than an unused path.
 
 Each review is persisted to Firestore in the shape documented in
 `infra/firestore-schema.md`, including a `decision` block recording how the
