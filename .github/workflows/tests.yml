@@ -4,10 +4,14 @@
 # and reviews anyway.
 name: tests
 
+# Also on push to every branch, not just main: the receiver's CI gate reads the
+# check state at the instant the webhook arrives, so a branch whose CI has
+# already run is the only way an "opened" event can find a red result. Waiting
+# for pull_request alone means CI is always pending at that moment and the gate
+# defers instead of halting.
 on:
   pull_request:
   push:
-    branches: [main]
 
 jobs:
   test:
