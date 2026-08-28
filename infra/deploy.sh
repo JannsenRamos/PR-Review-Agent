@@ -29,6 +29,13 @@ echo "==> Topics"
 gcloud pubsub topics create "$TOPIC" 2>/dev/null || echo "    $TOPIC exists"
 gcloud pubsub topics create "$DLQ"   2>/dev/null || echo "    $DLQ exists"
 
+# A dead-letter topic with no subscription discards on arrival: the message is
+# routed off the main subscription after 5 attempts and then dropped, so a
+# poisoned job looks identical to one that never existed. This subscription is
+# never consumed - it exists so the message is retained and can be inspected.
+gcloud pubsub subscriptions create "${DLQ}-hold" --topic="$DLQ" \
+  --message-retention-duration=7d 2>/dev/null || echo "    ${DLQ}-hold exists"
+
 echo "==> Firestore (native mode; fails harmlessly if the database exists)"
 gcloud firestore databases create --location="$REGION" 2>/dev/null || echo "    database exists"
 

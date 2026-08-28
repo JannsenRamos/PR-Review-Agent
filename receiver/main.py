@@ -15,7 +15,6 @@ import os
 
 import httpx
 from fastapi import FastAPI, Header, Request, Response
-
 from github_auth import GITHUB_API, api_headers
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

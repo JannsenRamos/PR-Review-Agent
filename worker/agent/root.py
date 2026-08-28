@@ -17,8 +17,8 @@ import uuid
 
 from config import (
     FINDING_TYPES,
-    GEMINI_MODEL,
     GCP_PROJECT,
+    GEMINI_MODEL,
     OUTCOME_CHANGES_REQUESTED,
     OUTCOME_ESCALATED,
     PAST_REVIEW_LIMIT,

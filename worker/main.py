@@ -13,8 +13,6 @@ import base64
 import json
 import logging
 
-from fastapi import FastAPI, Header, Request, Response
-
 from config import (
     LOCAL_DEV,
     OUTCOME_ESCALATED,
@@ -22,6 +20,7 @@ from config import (
     PUBSUB_AUDIENCE,
     review_key,
 )
+from fastapi import FastAPI, Header, Request, Response
 from tools.github_read import fetch_ci_status
 from tools.github_write import post_summary_comment
 from tools.memory import already_reviewed, write_review_event

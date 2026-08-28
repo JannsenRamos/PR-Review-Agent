@@ -85,7 +85,7 @@ def write_review_event(
         # and why it escalated when it did. Additive to the documented shape - a
         # cold reader that only knows the original fields is unaffected.
         "decision": decision or {},
-        "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "timestamp": dt.datetime.now(dt.UTC).isoformat(),
         "agent_version": AGENT_VERSION,
     }
     try:
