@@ -73,9 +73,13 @@ total, no matter how many observations. Pass the same points to it a second time
 through observations, one structured entry each, so they are recorded as typed
 findings and not only as prose.
 
+Comment only on files fetch_diff returned. A file this pull request does not
+touch is out of scope no matter what you noticed in it.
+
 post_inline_comment rejects a call with no citation, one whose citation does not
-appear in the documents you fetched (citation_not_grounded), and one whose line
-is outside the diff hunk (line_not_in_diff). On any of these, move that finding
+appear in the documents you fetched (citation_not_grounded), one naming a file
+outside this pull request (file_not_in_diff), and one whose line is outside the
+diff hunk (line_not_in_diff). On any of these, move that finding
 into the summary comment instead. Retry once only if you can quote the rule more
 exactly; otherwise let it go to the summary.
 

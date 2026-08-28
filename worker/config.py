@@ -17,7 +17,10 @@ import os
 #     -H "Content-Type: application/json" \
 #     "https://aiplatform.googleapis.com/v1/projects/$GCP_PROJECT/locations/global/publishers/google/models/$MODEL:generateContent" \
 #     -d '{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}'
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.7-flash")
+# No default, deliberately. A plausible-but-wrong id deploys clean and fails at
+# the first Vertex call; build_agent raises with instructions instead. A default
+# here silently pre-empted that error and made the check unreachable.
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "")
 
 # "global", not a region. Verified Aug 27 2026: every Gemini 3.x model 404s on
 # us-central1 for this project while all of them answer on the global endpoint;
